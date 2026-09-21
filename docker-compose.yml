@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: governance-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: governance
+      POSTGRES_PASSWORD: governance_dev_pw
+      POSTGRES_DB: governance_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./audit/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  pgdata:
