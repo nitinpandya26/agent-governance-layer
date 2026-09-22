@@ -1,4 +1,4 @@
-# agent-governance-layer
+<img width="2073" height="758" alt="image" src="https://github.com/user-attachments/assets/e123480e-35d8-430b-9bb2-b0bdaa344dbb" /># agent-governance-layer
 
 A governance and audit layer for AI agents operating inside financial workflows.
 Every decision gets logged.
@@ -37,14 +37,14 @@ tamper-evident record a regulator or CRO could actually trust.
 Proof: below said 2 outputs in the repo, including a live tamper test
 where editing a row directly in Postgres flips `verify_chain()` from `True` to `False`.
 
-data\sample_trace_req_030.txt
+data\sample_trace_req_030.txt - https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/sample_trace_req_030.txt
 
-data\sample_trace_req_031.txt
+data\sample_trace_req_031.txt - https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/sample_trace_req_031.txt
 
 
 ## Architecture
 
-data\agent_governance_layer_architecture.png
+data\agent_governance_layer_architecture.png - https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/agent_governance_layer_architecture.png?raw=true
 
 Request → FastAPI → LangGraph agent → tool calls (KYC, balance, country check)
 → structured decision (approve/reject/escalate + reasoning + confidence)
