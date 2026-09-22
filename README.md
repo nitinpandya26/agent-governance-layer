@@ -20,7 +20,7 @@ Most agent demos show capability. This shows control.
 
 An AI agent processes payment approval requests (approve / reject / escalate),
 using tool calls to gather context (customer KYC, balance, country restrictions).
-Every step: intake, tool call, reasoning, decision — is written to an
+Every step: intake, tool call, reasoning, decision - is written to an
 append-only, hash-chained audit log. Any tampering with the log after the fact
 is mathematically detectable.
 
