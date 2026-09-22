@@ -1,3 +1,13 @@
+#notes
+#Why each function exists:
+#create_run — call this once when a new payment request comes in
+#log_event — call this at every step (intake, tool call, agent decision, policy check, execution). It automatically finds the last hash and chains onto it, you never compute hashes yourself elsewhere
+#verify_chain — this is your proof-of-integrity function. Run it in a demo, edit a row directly in Postgres, run it again, watch it return False. That's your strongest talking point in an interview
+
+
+
+
+
 import hashlib
 import json
 import os
@@ -108,3 +118,22 @@ def verify_chain(run_id: str) -> bool:
         expected_prev = stored_hash
 
     return True
+
+def get_trace(run_id: str) -> list[dict]:
+    """Return every event for a run, in order — the full reconstructable trace."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT seq, event_type, payload, created_at FROM audit_events "
+                "WHERE run_id = %s ORDER BY seq ASC",
+                (run_id,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {"seq": seq, "event_type": event_type, "payload": payload, "created_at": created_at.isoformat()}
+        for seq, event_type, payload, created_at in rows
+    ]
