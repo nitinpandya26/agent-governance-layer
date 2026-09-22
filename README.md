@@ -36,7 +36,9 @@ tamper-evident record a regulator or CRO could actually trust.
 
 Proof: below said 2 outputs in the repo, including a live tamper test
 where editing a row directly in Postgres flips `verify_chain()` from `True` to `False`.
+
 data\sample_trace_req_030.txt
+
 data\sample_trace_req_031.txt
 
 
@@ -51,8 +53,8 @@ Request → FastAPI → LangGraph agent → tool calls (KYC, balance, country ch
 
 ## Stack
 
-Python, FastAPI, LangGraph, OpenAI, PostgreSQL, Docker Compose. Phase 2 adds
-Open Policy Agent (OPA/Rego) for declarative policy enforcement.
+Python, FastAPI, LangGraph, OpenAI, PostgreSQL, Docker Compose.
+Phase 2 adds Open Policy Agent (OPA/Rego) for declarative policy enforcement.
 
 ## A finding worth noting
 
