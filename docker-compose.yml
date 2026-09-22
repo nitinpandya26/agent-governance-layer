@@ -13,5 +13,20 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./audit/init.sql:/docker-entrypoint-initdb.d/init.sql
 
+  opa:
+    image: openpolicyagent/opa:1.20.2
+    container_name: governance-opa
+    ports:
+      - "8181:8181"
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--log-level=info"
+      - "/policies"
+    volumes:
+      - ./policies:/policies:ro
+    restart: unless-stopped
+
 volumes:
   pgdata:
