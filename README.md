@@ -20,17 +20,17 @@ Most agent demos show capability. This shows control.
 
 An AI agent processes payment approval requests (approve / reject / escalate),
 using tool calls to gather context (customer KYC, balance, country restrictions).
-Every step — intake, tool call, reasoning, decision — is written to an
+Every step: intake, tool call, reasoning, decision — is written to an
 append-only, hash-chained audit log. Any tampering with the log after the fact
 is mathematically detectable.
 
-**Current status:** Phase 1 complete — core agent loop + tamper-evident audit
+**Current status:** Phase 1 complete : core agent loop + tamper-evident audit
 trail. Phase 2 (policy-as-code enforcement with OPA) in progress.
 
 ## Why the hash chain matters
 
 Each audit event's hash is computed from its own data plus the previous event's
-hash — the same principle blockchains use. Edit any row after the fact, and
+hash - the same principle blockchains use. Edit any row after the fact, and
 every subsequent hash stops matching. This isn't a logging table, it's a
 tamper-evident record a regulator or CRO could actually trust.
 
@@ -86,5 +86,5 @@ uv run py tests/run_all.py
 ## About
 
 Nitin Pandya, Associate Director, Data & AI.
-Building this in public as part of willingness to contributing to AI/Data Product community.
+Building this in public as part of willingness to contribute to AI/Data Product community.
 https://www.linkedin.com/in/nitinpandya/
