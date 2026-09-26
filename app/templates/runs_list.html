@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Runs — Agent Governance Layer{% endblock %}
+{% block content %}
+<div class="card">
+<table>
+  <thead>
+    <tr>
+      <th>Requester</th>
+      <th>Amount</th>
+      <th>Destination</th>
+      <th>Category</th>
+      <th>Decision</th>
+      <th>Confidence</th>
+      <th>Policy</th>
+      <th>Submitted</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for run in runs %}
+    {% set req = run.request_payload %}
+    {% set d = run.decision %}
+    {% set p = run.policy %}
+    <tr>
+      <td>{{ req.requester_name or req.requester }}</td>
+      <td>{{ "%.2f"|format(req.amount) }} {{ req.currency }}</td>
+      <td>{{ req.destination_country }}</td>
+      <td>{{ req.category }}</td>
+      <td>
+        {% if d %}
+          <span class="badge badge-{{ d.decision }}">{{ d.decision }}</span>
+        {% else %}
+          <span class="badge badge-pending">pending</span>
+        {% endif %}
+      </td>
+      <td>{{ "%.0f%%"|format(d.confidence * 100) if d and (d.confidence is defined) else "—" }}</td>
+      <td>
+        {% if p %}
+          <span class="badge badge-policy-{{ p.result.outcome }}">{{ p.result.outcome }}</span>
+        {% else %}
+          <span class="badge badge-pending">pending</span>
+        {% endif %}
+      </td>
+      <td>{{ run.created_at[:19].replace("T", " ") }}</td>
+      <td><a href="/runs/{{ run.id }}" class="btn-outline btn-small">View trace</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

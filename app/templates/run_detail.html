@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run_id[:8] }} — Agent Governance Layer{% endblock %}
+{% block content %}
+
+<div class="card" style="margin-bottom:2rem;">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.8rem;">
+    <strong>Run <code>{{ run_id }}</code></strong>
+    <a href="/runs/{{ run_id }}/verify" class="btn-outline btn-small">Verify chain</a>
+  </div>
+
+  {% if verify_result is defined %}
+    {% if verify_result %}
+      <div class="verify-result verify-ok">✓ Chain valid — all {{ trace|length }} events verified, no tampering detected.</div>
+    {% else %}
+      <div class="verify-result verify-bad">✗ Chain INVALID — a stored hash does not match its recomputed value. This run's audit trail has been tampered with.</div>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+{% for event in trace %}
+<div class="trace-step">
+  {% if event.event_type == "intake" %}
+    <h4>1. Intake — request received</h4>
+    {% set req = event.payload.request %}
+    <p>
+      <strong>{{ req.requester_name or req.requester }}</strong> requests
+      <strong>{{ "%.2f"|format(req.amount) }} {{ req.currency }}</strong>
+      to <strong>{{ req.destination_country }}</strong> ({{ req.category }})
+    </p>
+    {% if req.memo %}
+      <p><small>Memo:</small></p>
+      <div class="memo-box">{{ req.memo }}</div>
+    {% endif %}
+
+  {% elif event.event_type == "tool_call" %}
+    <h4>Tool call — {{ event.payload.tool }}</h4>
+    <div class="tool-result">{{ event.payload.result | tojson(indent=2) }}</div>
+
+  {% elif event.event_type == "agent_decision" %}
+    <h4>Agent decision</h4>
+    <p>
+      <span class="badge badge-{{ event.payload.decision }}">{{ event.payload.decision }}</span>
+      {% if event.payload.confidence is defined %}
+      <small>confidence {{ "%.0f%%"|format(event.payload.confidence * 100) }}</small>
+      {% endif %}
+    </p>
+    {% if event.payload.reasoning is defined %}
+    <p>{{ event.payload.reasoning }}</p>
+    {% endif %}
+    {% if event.payload.facts_relied_on %}
+      <p><small>Facts relied on:</small></p>
+      <ul class="fact-list">
+        {% for fact in event.payload.facts_relied_on %}
+        <li>{{ fact }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+  {% elif event.event_type == "policy_check" %}
+    {% set r = event.payload.result %}
+    <h4>Policy check</h4>
+    <p>
+      <span class="badge badge-policy-{{ r.outcome }}">{{ r.outcome }}</span>
+      <small>policy version {{ event.payload.policy_version }}</small>
+    </p>
+    {% set reasons = (r.deny_reasons or []) + (r.escalate_reasons or []) %}
+    {% if reasons %}
+      {% for reason in reasons %}
+      <div class="policy-reason"><code>{{ reason.policy }}</code> {{ reason.message }}</div>
+      {% endfor %}
+    {% else %}
+      <p><small>No policy violations — request passes all rules as evaluated.</small></p>
+    {% endif %}
+
+  {% else %}
+    <h4>{{ event.event_type }}</h4>
+    <div class="tool-result">{{ event.payload | tojson(indent=2) }}</div>
+  {% endif %}
+  <small>seq {{ event.seq }} — {{ event.created_at[:19].replace("T", " ") }}</small>
+</div>
+{% endfor %}
+</div>
+
+{% endblock %}
