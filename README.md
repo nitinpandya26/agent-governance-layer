@@ -56,7 +56,7 @@ data\sample_trace_req_031.txt - https://github.com/nitinpandya26/agent-governanc
 ## Architecture
 
 data\agent_governance_layer_architecture.png - 
-https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/agent_governance_layer_architecture.png?raw=true 
+[https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/agent_governance_layer_architecture.png?raw=true ](https://raw.githubusercontent.com/nitinpandya26/agent-governance-layer/refs/heads/main/data/agent_governance_layer_architecture.png)
 
 Request → FastAPI → LangGraph agent → tool calls (KYC, balance, country check)
 → structured decision (approve/reject/escalate + reasoning + confidence)
