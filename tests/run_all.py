@@ -15,8 +15,14 @@ for i, req in enumerate(requests):
     print(f"[{i+1}/{len(requests)}] Processing {req['request_id']}...")
     try:
         result = graph.invoke({"request": req, "run_id": "", "tool_results": {}, "decision": {}})
-        run_ids.append({"request_id": req["request_id"], "run_id": result["run_id"], "decision": result["decision"]["decision"]})
-        print(f"  -> {result['decision']['decision']} (confidence {result['decision']['confidence']})")
+        run_ids.append({
+            "request_id": req["request_id"],
+            "run_id": result["run_id"],
+            "decision": result["decision"]["decision"],
+            "policy_outcome": result["policy_result"]["outcome"],
+            "policy_reasons": result["policy_result"]["deny_reasons"] + result["policy_result"]["escalate_reasons"],
+        })
+        print(f"  -> agent: {result['decision']['decision']} (confidence {result['decision']['confidence']}) | policy: {result['policy_result']['outcome']}")
     except Exception as e:
         print(f"  -> ERROR: {e}")
     time.sleep(0.5)  # gentle on rate limits
