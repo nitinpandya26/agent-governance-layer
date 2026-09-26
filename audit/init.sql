@@ -3,7 +3,8 @@ CREATE TABLE runs (
     request_payload JSONB NOT NULL,
     status TEXT NOT NULL DEFAULT 'in_progress',  -- in_progress, allowed, escalated, denied
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    completed_at TIMESTAMPTZ
+    completed_at TIMESTAMPTZ,
+    resolved_at TIMESTAMPTZ  -- set when a human resolves an escalated run
 );
 
 CREATE TABLE audit_events (

@@ -119,6 +119,107 @@ def verify_chain(run_id: str) -> bool:
 
     return True
 
+def list_runs() -> list[dict]:
+    """Return every run with its latest agent_decision and policy_check
+    payloads attached (either may be None if that step hasn't run yet),
+    newest first."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT r.id, r.request_payload, r.created_at,
+                       (SELECT ae.payload FROM audit_events ae
+                        WHERE ae.run_id = r.id AND ae.event_type = 'agent_decision'
+                        ORDER BY ae.seq DESC LIMIT 1) AS decision_payload,
+                       (SELECT ae.payload FROM audit_events ae
+                        WHERE ae.run_id = r.id AND ae.event_type = 'policy_check'
+                        ORDER BY ae.seq DESC LIMIT 1) AS policy_payload
+                FROM runs r
+                ORDER BY r.created_at DESC
+                """
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "id": str(run_id),
+            "request_payload": request_payload,
+            "created_at": created_at.isoformat(),
+            "decision": decision_payload,
+            "policy": policy_payload,
+        }
+        for run_id, request_payload, created_at, decision_payload, policy_payload in rows
+    ]
+
+
+def finalize_run(run_id: str, status: str) -> None:
+    """Set a run's terminal status (allowed/escalated/denied) and mark it
+    completed. Called once the policy gate has produced its outcome."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE runs SET status = %s, completed_at = now() WHERE id = %s",
+                (status, run_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_escalations() -> list[dict]:
+    """Return every run still awaiting human review: status='escalated' and
+    not yet resolved, oldest first so the queue reads like a worklist."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT r.id, r.request_payload, r.created_at,
+                       (SELECT ae.payload FROM audit_events ae
+                        WHERE ae.run_id = r.id AND ae.event_type = 'agent_decision'
+                        ORDER BY ae.seq DESC LIMIT 1) AS decision_payload,
+                       (SELECT ae.payload FROM audit_events ae
+                        WHERE ae.run_id = r.id AND ae.event_type = 'policy_check'
+                        ORDER BY ae.seq DESC LIMIT 1) AS policy_payload
+                FROM runs r
+                WHERE r.status = 'escalated' AND r.resolved_at IS NULL
+                ORDER BY r.created_at ASC
+                """
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "id": str(run_id),
+            "request_payload": request_payload,
+            "created_at": created_at.isoformat(),
+            "decision": decision_payload,
+            "policy": policy_payload,
+        }
+        for run_id, request_payload, created_at, decision_payload, policy_payload in rows
+    ]
+
+
+def resolve_escalation(run_id: str) -> None:
+    """Mark an escalated run as resolved by a human reviewer."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE runs SET resolved_at = now() WHERE id = %s",
+                (run_id,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_trace(run_id: str) -> list[dict]:
     """Return every event for a run, in order — the full reconstructable trace."""
     conn = get_connection()
