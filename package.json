@@ -1,0 +1,14 @@
+{
+  "name": "agent-governance-layer-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Small TypeScript interaction layer for the FastAPI + Jinja UI (app/templates). Not a frontend framework, just polish on top of server-rendered pages.",
+  "scripts": {
+    "build": "esbuild app/static/src/main.ts --bundle --outfile=app/static/main.js --target=es2019",
+    "watch": "esbuild app/static/src/main.ts --bundle --outfile=app/static/main.js --target=es2019 --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}

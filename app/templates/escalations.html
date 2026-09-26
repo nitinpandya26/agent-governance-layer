@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Escalations — Agent Governance Layer{% endblock %}
+{% block content %}
+<h2>Escalation queue</h2>
+{% if not escalations %}
+  <div class="card"><p style="margin:0;"><small>Nothing waiting on human review.</small></p></div>
+{% else %}
+<div class="card">
+  {% for run in escalations %}
+  {% set req = run.request_payload %}
+  {% set d = run.decision %}
+  {% set p = run.policy %}
+  <div class="queue-row">
+    <div>
+      <div class="who">{{ req.requester_name or req.requester }} &middot; {{ "%.2f"|format(req.amount) }} {{ req.currency }} &middot; {{ req.destination_country }}</div>
+      <div class="why">
+        {% if d %}<span class="badge badge-{{ d.decision }}" style="margin-right:0.5rem;">{{ d.decision }}</span>{% endif %}
+        {% for reason in (p.result.escalate_reasons if p else []) %}
+          <code>{{ reason.policy }}</code> {{ reason.message }}
+        {% endfor %}
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; gap:0.7rem; flex-shrink:0;">
+      <a href="/runs/{{ run.id }}" class="btn-outline btn-small">View trace</a>
+      <form method="post" action="/escalations/{{ run.id }}/resolve" data-resolve-form>
+        <button type="submit" class="resolve-btn">Resolve</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

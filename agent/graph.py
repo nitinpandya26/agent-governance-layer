@@ -1,5 +1,7 @@
 import os
 import json
+import subprocess
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
@@ -7,7 +9,8 @@ from typing import TypedDict
 
 from agent.tools import lookup_customer, check_kyc_status, get_account_balance, check_country_restriction
 from agent.schemas import AgentDecision
-from audit.logger import create_run, log_event
+from audit.logger import create_run, log_event, finalize_run
+from policies.client import evaluate as evaluate_policy
 
 load_dotenv()
 
@@ -20,6 +23,29 @@ class GraphState(TypedDict):
     run_id: str
     tool_results: dict
     decision: dict
+    policy_result: dict
+
+
+def _policy_version() -> str:
+    """Git SHA of the current /policies contents, so every logged policy
+    check is traceable to the exact rules that produced it. Returns
+    'uncommitted' if policies/ has any uncommitted or untracked changes,
+    since the last commit's SHA would otherwise misrepresent what actually
+    ran."""
+    repo_root = Path(__file__).resolve().parent.parent
+    try:
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--", "policies"],
+            capture_output=True, text=True, check=True, cwd=repo_root,
+        ).stdout.strip()
+        if dirty:
+            return "uncommitted"
+        return subprocess.run(
+            ["git", "log", "-1", "--format=%H", "--", "policies"],
+            capture_output=True, text=True, check=True, cwd=repo_root,
+        ).stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def intake_node(state: GraphState) -> GraphState:
@@ -75,15 +101,58 @@ Provide your decision with clear reasoning."""
     return {**state, "decision": decision_dict}
 
 
+def policy_gate_node(state: GraphState) -> GraphState:
+    req = state["request"]
+    decision = state["decision"]
+    kyc_verified = state["tool_results"].get("check_kyc_status", {}).get("kyc_verified", False)
+
+    policy_input = {
+        "request": req,
+        "context": {"kyc_status": "verified" if kyc_verified else "unverified"},
+        "proposed_action": {
+            "decision": decision["decision"],
+            "confidence": decision["confidence"],
+            "tools_called": decision["tools_called"],
+        },
+    }
+
+    try:
+        result = evaluate_policy(policy_input)
+    except Exception as exc:
+        # Fail closed: an unreachable policy engine must never be treated as
+        # a silent allow. Route to a human instead of asserting a violation
+        # the engine never actually checked for.
+        result = {
+            "outcome": "escalate",
+            "deny_reasons": [],
+            "escalate_reasons": [
+                {"policy": "policy_engine_unavailable", "message": str(exc)}
+            ],
+        }
+
+    log_event(
+        state["run_id"],
+        "policy_check",
+        {"policy_version": _policy_version(), "input": policy_input, "result": result},
+    )
+
+    status = {"allow": "allowed", "deny": "denied", "escalate": "escalated"}[result["outcome"]]
+    finalize_run(state["run_id"], status)
+
+    return {**state, "policy_result": result}
+
+
 def build_graph():
     graph = StateGraph(GraphState)
     graph.add_node("intake", intake_node)
     graph.add_node("gather_context", gather_context_node)
     graph.add_node("reason", reason_node)
+    graph.add_node("policy_gate", policy_gate_node)
 
     graph.set_entry_point("intake")
     graph.add_edge("intake", "gather_context")
     graph.add_edge("gather_context", "reason")
-    graph.add_edge("reason", END)
+    graph.add_edge("reason", "policy_gate")
+    graph.add_edge("policy_gate", END)
 
     return graph.compile()

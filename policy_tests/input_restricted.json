@@ -1,0 +1,18 @@
+{
+  "request": {
+    "requester": "cust_002",
+    "amount": 4200,
+    "currency": "USD",
+    "destination_country": "Iran",
+    "category": "travel",
+    "memo": "Equipment purchase"
+  },
+  "context": {
+    "kyc_status": "verified"
+  },
+  "proposed_action": {
+    "decision": "approve",
+    "confidence": 0.88,
+    "tools_called": ["lookup_customer", "check_kyc_status", "get_account_balance"]
+  }
+}

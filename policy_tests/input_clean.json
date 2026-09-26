@@ -1,0 +1,18 @@
+{
+  "request": {
+    "requester": "cust_001",
+    "amount": 2500,
+    "currency": "USD",
+    "destination_country": "US",
+    "category": "travel",
+    "memo": "Conference travel reimbursement"
+  },
+  "context": {
+    "kyc_status": "verified"
+  },
+  "proposed_action": {
+    "decision": "approve",
+    "confidence": 0.92,
+    "tools_called": ["lookup_customer", "check_kyc_status", "get_account_balance"]
+  }
+}
