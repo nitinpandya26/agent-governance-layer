@@ -20,40 +20,32 @@ Most agent demos show capability. This shows control.
 
 An AI agent processes payment approval requests (approve / reject / escalate),
 using tool calls to gather context (customer KYC, balance, country restrictions).
-Every step, intake, tool call, reasoning, decision, is written to an
+Every step: intake, tool call, reasoning, decision - is written to an
 append-only, hash-chained audit log. Any tampering with the log after the fact
 is mathematically detectable.
 
-Once the agent proposes a decision, it passes through an Open Policy Agent
-(OPA) gate before anything is treated as final. The policy checks facts, not
-memo text: destination country, category, KYC status, account confidence,
-and a hard dollar threshold. If the agent approves something the policy
-doesn't like, the run is escalated or denied regardless of what the agent
-concluded, and both the agent's reasoning and the policy's reasons are
-logged side by side. A small web UI (FastAPI + Jinja) lets you browse every
-run's full trace, verify its hash chain, and work an escalation queue of
-runs waiting on human review.
-
-**Current status:** Phase 1 and Phase 2 complete: core agent loop,
-tamper-evident audit trail, and OPA policy gate with escalation queue, all
-running locally end to end. Phase 3 (dashboard) is next.
+**Current status:** Phase 1 complete : core agent loop + tamper-evident audit
+trail. Phase 2 (policy-as-code enforcement with OPA) in progress.
 
 ## Why the hash chain matters
 
 Each audit event's hash is computed from its own data plus the previous event's
-hash — the same principle blockchains use. Edit any row after the fact, and
+hash - the same principle blockchains use. Edit any row after the fact, and
 every subsequent hash stops matching. This isn't a logging table, it's a
 tamper-evident record a regulator or CRO could actually trust.
 
 Proof: below said 2 outputs in the repo, including a live tamper test
 where editing a row directly in Postgres flips `verify_chain()` from `True` to `False`.
-data\sample_trace_req_030.txt
-data\sample_trace_req_031.txt
+
+data\sample_trace_req_030.txt - https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/sample_trace_req_030.txt
+
+data\sample_trace_req_031.txt - https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/sample_trace_req_031.txt
 
 
 ## Architecture
 
-![Agent Governance Layer architecture diagram](data/agent_governance_layer_architecture.png)
+data\agent_governance_layer_architecture.png - https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/agent_governance_layer_architecture.png?raw=true
+<img width="2073" height="758" alt="image" src="https://github.com/user-attachments/assets/e123480e-35d8-430b-9bb2-b0bdaa344dbb" />
 
 Request → FastAPI → LangGraph agent → tool calls (KYC, balance, country check)
 → structured decision (approve/reject/escalate + reasoning + confidence)
@@ -81,8 +73,8 @@ live in `policy_tests/` and run with `opa test`.
 
 ## Stack
 
-Python, FastAPI, LangGraph, OpenAI, PostgreSQL, Docker Compose, Open Policy
-Agent (OPA/Rego) for declarative policy enforcement.
+Python, FastAPI, LangGraph, OpenAI, PostgreSQL, Docker Compose.
+Phase 2 adds Open Policy Agent (OPA/Rego) for declarative policy enforcement.
 
 ## A finding worth noting
 
@@ -135,5 +127,5 @@ docker run --rm -v "$(pwd)/policies:/policies" -v "$(pwd)/policy_tests:/policy_t
 ## About
 
 Nitin Pandya, Associate Director, Data & AI.
-Building this in public as part of willingness to contributing to AI/Data Product community.
+Building this in public as part of willingness to contribute to AI/Data Product community.
 https://www.linkedin.com/in/nitinpandya/
