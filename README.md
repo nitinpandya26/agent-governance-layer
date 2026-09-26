@@ -24,8 +24,19 @@ Every step: intake, tool call, reasoning, decision - is written to an
 append-only, hash-chained audit log. Any tampering with the log after the fact
 is mathematically detectable.
 
-**Current status:** Phase 1 complete : core agent loop + tamper-evident audit
-trail. Phase 2 (policy-as-code enforcement with OPA) in progress.
+Once the agent proposes a decision, it passes through an Open Policy Agent
+(OPA) gate before anything is treated as final. The policy checks facts, not
+memo text: destination country, category, KYC status, account confidence,
+and a hard dollar threshold. If the agent approves something the policy
+doesn't like, the run is escalated or denied regardless of what the agent
+concluded, and both the agent's reasoning and the policy's reasons are
+logged side by side. A small web UI (FastAPI + Jinja) lets you browse every
+run's full trace, verify its hash chain, and work an escalation queue of
+runs waiting on human review.
+
+**Current status:** Phase 1 and Phase 2 complete - core agent loop,
+tamper-evident audit trail, and OPA policy gate with escalation queue, all
+running locally end to end. Phase 3 (dashboard) is next.
 
 ## Why the hash chain matters
 
