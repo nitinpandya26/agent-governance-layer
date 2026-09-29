@@ -80,7 +80,10 @@ approvals move money. Current rules:
 Every policy check is logged with the exact input sent to OPA, the result,
 and a policy version (the git SHA of `/policies`), so any decision can be
 traced back to the exact rules that produced it. Unit tests for the policy
-live in `policy_tests/` and run with `opa test`.
+live in `policy_tests/` and run with
+`opa test policies policy_tests --ignore "*.json"` (the `input_*.json`
+files are standalone sample inputs for manual `opa eval -i`, not test
+data, so they're excluded from the test run).
 
 ## Stack
 
