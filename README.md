@@ -21,8 +21,11 @@ Most agent demos show capability. This shows control.
 An AI agent processes payment approval requests (approve / reject / escalate),
 using tool calls to gather context (customer KYC, balance, country restrictions).
 Every step: intake, tool call, reasoning, decision - is written to an
-append-only, hash-chained audit log. Any tampering with the log after the fact
-is mathematically detectable.
+append-only, hash-chained audit log. Editing a row without also recomputing
+every hash after it is immediately detectable. On its own, that's not a
+defense against someone who understands the chain and rewrites everything
+downstream to match - see "Why the hash chain matters" below for what closes
+that gap and what's still open.
 
 Once the agent proposes a decision, it passes through an Open Policy Agent
 (OPA) gate before anything is treated as final. The policy checks facts, not
@@ -35,15 +38,46 @@ run's full trace, verify its hash chain, and work an escalation queue of
 runs waiting on human review.
 
 **Current status:** Phase 1 and Phase 2 complete - core agent loop,
-tamper-evident audit trail, and OPA policy gate with escalation queue, all
-running locally end to end. Phase 3 (dashboard) is next.
+hash-chained audit trail with an external anchor, and OPA policy gate with
+escalation queue, all running locally end to end. Phase 3 (dashboard) is
+next.
+
+## Scope: what this governs, and what it doesn't
+
+This project governs the *decision*: given policy and context, should this
+agent be allowed to take this action. It does not govern *execution-time
+authority*: once a decision is approved, what enforces that the agent acts
+only as that decision, under the correct identity and delegated authority,
+against the correct target, only for as long as the approval stays valid.
+That's a separate, complementary layer (identity/access products like Curity
+sit there), and this repo doesn't claim to cover it. Worth stating explicitly
+so it's not assumed to be end-to-end governance.
 
 ## Why the hash chain matters
 
 Each audit event's hash is computed from its own data plus the previous event's
-hash - the same principle blockchains use. Edit any row after the fact, and
-every subsequent hash stops matching. This isn't a logging table, it's a
-tamper-evident record a regulator or CRO could actually trust.
+hash - the same principle blockchains use. Edit any row after the fact without
+touching anything else, and every subsequent hash stops matching -
+`verify_chain()` catches that immediately.
+
+That check has a real limit: it only walks forward through what's currently
+in Postgres and trusts it. Someone with the same database access used to edit
+a row can also recompute that row's hash and every downstream `prev_hash`/
+`hash`, and the chain re-validates as internally consistent despite being
+altered. A hash chain only proves tampering against a head stored somewhere
+that access can't reach.
+
+**External anchor:** `finalize_run()` writes each run's final chain head
+(sequence + hash) to [`audit/chain_anchors.jsonl`](audit/chain_anchors.jsonl),
+a git-tracked file. That file on its own isn't the anchor - it lives on the
+same disk as the database, so it needs to actually be committed and pushed
+for it to sit outside whatever access could tamper with Postgres. Once
+pushed, `verify_chain_against_anchor()` (used by `tests/verify_run.py`) can
+catch a fully rewritten chain by comparing the current head against what git
+history says it was when the run finished - a check a forward-only
+`verify_chain()` walk cannot make. Anchors not yet pushed offer no
+protection; commit and push `audit/chain_anchors.jsonl` on a schedule (or
+after any run you care about) for this to hold.
 
 Proof: below said 2 outputs in the repo, including a live tamper test
 where editing a row directly in Postgres flips `verify_chain()` from `True` to `False`.
@@ -129,7 +163,7 @@ docker run --rm -v "$(pwd)/policies:/policies" -v "$(pwd)/policy_tests:/policy_t
 
 ## Roadmap
 
-- [x] Phase 1: Core agent loop + tamper-evident audit trail
+- [x] Phase 1: Core agent loop + hash-chained audit trail with external anchor
 - [x] Phase 2: OPA policy-as-code enforcement + escalation queue
 - [ ] Phase 3: Dashboard + named case study
 - [ ] Phase 4: LLM-as-judge (stretch)

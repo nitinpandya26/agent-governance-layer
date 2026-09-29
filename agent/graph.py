@@ -94,6 +94,10 @@ Provide your decision with clear reasoning."""
 
     result: AgentDecision = structured_llm.invoke(prompt)
     decision_dict = result.model_dump()
+    # Overwrite whatever the model claims it called with the actual tool
+    # calls made in gather_context_node, so policy_gate_node's
+    # required-evidence check is against ground truth, not the model's
+    # self-report.
     decision_dict["tools_called"] = list(context.keys())
 
     log_event(state["run_id"], "agent_decision", decision_dict)
@@ -106,6 +110,18 @@ def policy_gate_node(state: GraphState) -> GraphState:
     decision = state["decision"]
     kyc_verified = state["tool_results"].get("check_kyc_status", {}).get("kyc_verified", False)
 
+    # Fact-sourcing contract, deliberate: every field OPA checks as a *fact*
+    # (kyc_status, request.amount/country/category, tools_called) is read
+    # from state["tool_results"] or the raw request, never from the agent's
+    # own decision object. A model that restates a fact wrong in its
+    # reasoning cannot get that wrong restatement checked as if it were
+    # true. `decision`/`confidence` are the only fields sourced from the
+    # agent's proposal, and that's correct — they're the thing being
+    # governed, not a fact being verified. Do not "simplify" this by
+    # pulling kyc_status/tools_called from `decision` instead of
+    # `tool_results` — that would let a fooled model's restatement of its
+    # own tool results bypass the policy it's supposed to be checked
+    # against.
     policy_input = {
         "request": req,
         "context": {"kyc_status": "verified" if kyc_verified else "unverified"},
