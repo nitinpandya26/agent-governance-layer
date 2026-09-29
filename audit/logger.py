@@ -12,10 +12,16 @@ import hashlib
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg2
 from psycopg2.extras import Json
+
+# External anchor file for chain heads (see anchor_run/verify_chain_against_anchor
+# below). Git-tracked and committed/pushed separately from the app's DB
+# credentials, so it is not something the app's own Postgres access can rewrite.
+ANCHOR_FILE = Path(__file__).resolve().parent / "chain_anchors.jsonl"
 
 
 def get_connection():
@@ -92,6 +98,110 @@ def log_event(run_id: str, event_type: str, payload: dict) -> dict:
     }
 
 
+def anchor_run(run_id: str) -> dict | None:
+    """Append the run's current chain head (last seq + hash) to
+    audit/chain_anchors.jsonl. This is called once the run reaches a
+    terminal status (see finalize_run).
+
+    This file alone is NOT the external anchor — it lives on the same disk
+    as the Postgres data, so anyone with DB access could edit this file too.
+    It becomes an actual anchor only once it's committed and pushed to git:
+    a git-pushed commit is outside the reach of whatever access let someone
+    tamper with the database, so verify_chain_against_anchor() can catch a
+    forged chain (one where every downstream hash was also recomputed to
+    stay internally consistent) by comparing against the head recorded in
+    git history, not just what's currently in Postgres.
+
+    Run `git add audit/chain_anchors.jsonl && git commit && git push`
+    periodically to actually lock these heads in. An unpushed anchor
+    provides no protection.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT seq, hash FROM audit_events WHERE run_id = %s ORDER BY seq DESC LIMIT 1",
+                (run_id,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+
+    seq, hash_ = row
+    entry = {
+        "run_id": run_id,
+        "seq": seq,
+        "hash": hash_,
+        "anchored_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with open(ANCHOR_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, sort_keys=True) + "\n")
+
+    return entry
+
+
+def _latest_anchor(run_id: str) -> dict | None:
+    """Read the last (highest-seq) anchor recorded for this run in the
+    local anchor file. Returns None if the file doesn't exist or the run
+    was never anchored."""
+    if not ANCHOR_FILE.exists():
+        return None
+
+    latest = None
+    with open(ANCHOR_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            if entry["run_id"] != run_id:
+                continue
+            if latest is None or entry["seq"] > latest["seq"]:
+                latest = entry
+    return latest
+
+
+def verify_chain_against_anchor(run_id: str) -> dict:
+    """Stronger check than verify_chain() alone: also compares the current
+    chain head against the head recorded in the local anchor file.
+
+    - chain_valid: result of the normal forward hash-chain walk.
+    - anchor_found: whether this run has an entry in chain_anchors.jsonl.
+    - anchor_matches: whether the anchored hash still matches the current
+      chain head. False here means the chain was rewritten after it was
+      anchored — the scenario a plain verify_chain() forward walk cannot
+      catch, since a rewritten chain re-validates as internally consistent.
+
+    Remember this only defends against tampering that happened after the
+    anchor file itself was committed and pushed to git; an anchor entry
+    that only exists on local disk offers no protection.
+    """
+    chain_valid = verify_chain(run_id)
+
+    anchor = _latest_anchor(run_id)
+    if anchor is None:
+        return {"chain_valid": chain_valid, "anchor_found": False, "anchor_matches": None}
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT seq, hash FROM audit_events WHERE run_id = %s ORDER BY seq DESC LIMIT 1",
+                (run_id,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    current_seq, current_hash = row if row else (None, None)
+    matches = anchor["seq"] == current_seq and anchor["hash"] == current_hash
+
+    return {"chain_valid": chain_valid, "anchor_found": True, "anchor_matches": matches}
+
+
 def verify_chain(run_id: str) -> bool:
     """Recompute every hash in sequence and check it matches what's stored.
     Returns False the moment any row's stored hash doesn't match — meaning
@@ -157,7 +267,10 @@ def list_runs() -> list[dict]:
 
 def finalize_run(run_id: str, status: str) -> None:
     """Set a run's terminal status (allowed/escalated/denied) and mark it
-    completed. Called once the policy gate has produced its outcome."""
+    completed. Called once the policy gate has produced its outcome.
+    Also anchors the run's final chain head locally (see anchor_run) —
+    remember to commit/push audit/chain_anchors.jsonl for that anchor to
+    actually count as external."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -168,6 +281,8 @@ def finalize_run(run_id: str, status: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+    anchor_run(run_id)
 
 
 def list_escalations() -> list[dict]:
