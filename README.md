@@ -55,8 +55,8 @@ data\sample_trace_req_031.txt - https://github.com/nitinpandya26/agent-governanc
 
 ## Architecture
 
-data\agent_governance_layer_architecture.png - https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/agent_governance_layer_architecture.png?raw=true
-<img width="2073" height="758" alt="image" src="https://github.com/user-attachments/assets/e123480e-35d8-430b-9bb2-b0bdaa344dbb" />
+data\agent_governance_layer_architecture.png - 
+[https://github.com/nitinpandya26/agent-governance-layer/blob/main/data/agent_governance_layer_architecture.png?raw=true ](https://raw.githubusercontent.com/nitinpandya26/agent-governance-layer/refs/heads/main/data/agent_governance_layer_architecture.png)
 
 Request → FastAPI → LangGraph agent → tool calls (KYC, balance, country check)
 → structured decision (approve/reject/escalate + reasoning + confidence)
@@ -80,10 +80,7 @@ approvals move money. Current rules:
 Every policy check is logged with the exact input sent to OPA, the result,
 and a policy version (the git SHA of `/policies`), so any decision can be
 traced back to the exact rules that produced it. Unit tests for the policy
-live in `policy_tests/` and run with
-`opa test policies policy_tests --ignore "*.json"` (the `input_*.json`
-files are standalone sample inputs for manual `opa eval -i`, not test
-data, so they're excluded from the test run).
+live in `policy_tests/` and run with `opa test`.
 
 ## Stack
 
