@@ -72,6 +72,18 @@ escalate_reasons contains r if {
     }
 }
 
+# NOTE on what this floor actually catches: `confidence` is self-reported by
+# the model in its own structured output, uncalibrated and unverified. This
+# rule routes *honest uncertainty* (the model saying "I'm not sure") to a
+# human. It is not a defense against a manipulated model that comes out
+# confidently wrong — nothing here checks the stated confidence against
+# anything real, so a fooled model reporting high confidence sails straight
+# through this rule. The actual defense against a fooled model is that every
+# *fact* this policy checks (kyc_status, tools_called, request fields) is
+# sourced from tool_results/the raw request upstream, never from the model's
+# own proposal - see the fact-sourcing comment in agent/graph.py's
+# policy_gate_node. Don't read this rule as covering more than it does.
+
 # ---------- outcome ----------
 
 default outcome := "allow"
