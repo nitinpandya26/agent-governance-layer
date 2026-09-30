@@ -68,16 +68,37 @@ altered. A hash chain only proves tampering against a head stored somewhere
 that access can't reach.
 
 **External anchor:** `finalize_run()` writes each run's final chain head
-(sequence + hash) to [`audit/chain_anchors.jsonl`](audit/chain_anchors.jsonl),
-a git-tracked file. That file on its own isn't the anchor - it lives on the
-same disk as the database, so it needs to actually be committed and pushed
-for it to sit outside whatever access could tamper with Postgres. Once
-pushed, `verify_chain_against_anchor()` (used by `tests/verify_run.py`) can
-catch a fully rewritten chain by comparing the current head against what git
+(sequence + hash) to [`audit/chain_anchors.jsonl`](audit/chain_anchors.jsonl)
+locally. That file on its own isn't the anchor - it lives on the same disk
+as the database, so it needs to actually be pushed to git for it to sit
+outside whatever access could tamper with Postgres. Once pushed,
+`verify_chain_against_anchor()` (used by `tests/verify_run.py`) can catch a
+fully rewritten chain by comparing the current head against what git
 history says it was when the run finished - a check a forward-only
-`verify_chain()` walk cannot make. Anchors not yet pushed offer no
-protection; commit and push `audit/chain_anchors.jsonl` on a schedule (or
-after any run you care about) for this to hold.
+`verify_chain()` walk cannot make.
+
+**Who pushes it, and why that matters:** `scripts/push_anchor.py` publishes
+the anchor file to a dedicated `anchors` branch using `ANCHOR_GIT_TOKEN`, a
+GitHub token scoped only to this repo's contents, deliberately separate
+from the operator's normal git/GitHub credentials, and commits under a
+distinct author identity (`agent-governance-anchor-bot`). The point: if the
+anchor commits were pushed with the same credentials used for everything
+else, an attacker who obtained those credentials could tamper with the
+database and rewrite the anchor with the same access, and the anchor would
+prove nothing. A separate scoped token means a leaked or misused database
+credential alone can't also rewrite the anchor.
+
+**What this does and doesn't cover, stated plainly:** this defends against
+tampering by someone who only has database access - a leaked DB credential,
+a bug or injection that only reaches Postgres, an insider with DB rights but
+not the anchor token. It does not defend against a full compromise of the
+machine this all runs on, since that machine holds the DB connection, the
+anchor script, and (if present in the environment) the scoped token all at
+once. No single-operator local setup can fully separate those; a real
+production deployment would run the anchor step on infrastructure the
+operator's own machine can't reach. Worth being explicit about that instead
+of letting "external anchor" imply more isolation than a local dev setup
+can actually provide.
 
 Proof: below said 2 outputs in the repo, including a live tamper test
 where editing a row directly in Postgres flips `verify_chain()` from `True` to `False`.
@@ -172,6 +193,15 @@ Run the policy's own unit tests with the same OPA image used in Docker Compose:
 \`\`\`bash
 docker run --rm -v "$(pwd)/policies:/policies" -v "$(pwd)/policy_tests:/policy_tests" \\
   openpolicyagent/opa:1.20.2 test /policies /policy_tests/decision_test.rego -v
+\`\`\`
+
+Publish the external hash-chain anchor (see "Why the hash chain matters"
+above for what this does and doesn't protect against). Requires
+`ANCHOR_GIT_TOKEN`, a GitHub token scoped only to this repo's contents,
+kept separate from your normal git credentials:
+
+\`\`\`bash
+uv run python scripts/push_anchor.py
 \`\`\`
 
 ## Roadmap
