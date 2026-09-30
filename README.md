@@ -111,10 +111,23 @@ approvals move money. Current rules:
 - Amount above the auto-approve limit ($10,000) → escalate to a human
 - Agent confidence below the routing floor (0.70) → escalate to a human
 
+The facts above (country, category, KYC status, tools actually called) are
+read from the tool-call results and the raw request, never from the agent's
+own proposal, so a model that misstates one of them can't get that
+misstatement checked as if it were true - see `policy_gate_node` in
+`agent/graph.py`. The one exception is the confidence floor: `confidence` is
+self-reported by the model, uncalibrated, so that rule catches honest
+uncertainty, not a model that's confidently wrong because it was
+manipulated. Nothing here currently checks a stated confidence score against
+anything real.
+
 Every policy check is logged with the exact input sent to OPA, the result,
 and a policy version (the git SHA of `/policies`), so any decision can be
 traced back to the exact rules that produced it. Unit tests for the policy
-live in `policy_tests/` and run with `opa test`.
+live in `policy_tests/` and run with
+`opa test policies policy_tests --ignore "*.json"` (the `input_*.json`
+files are standalone sample inputs for manual `opa eval -i`, not test
+data, so they're excluded from the test run).
 
 ## Stack
 
