@@ -75,6 +75,16 @@ def reason_node(state: GraphState) -> GraphState:
     req = state["request"]
     context = state["tool_results"]
 
+    # Deliberately not stating the $10,000 auto-approve limit here (it only
+    # lives in policies/decision.rego's auto_approve_limit). Per Alan Law's
+    # comment on the Phase 2 post (see docs/linkedin_feedback.md): the one
+    # case in the 32-request test set where the agent and policy actually
+    # diverged was a clean $11,000 approval escalated purely on crossing
+    # this line, which is the cleanest evidence available that the model
+    # and the policy gate check independently rather than one just
+    # rubber-stamping the other. Handing the model this number would make
+    # that rule stop firing and erase that evidence. Don't "fix" this by
+    # adding the threshold here - it's intentional, not an oversight.
     prompt = f"""You are a payment approval agent for a bank. Review this payment request
 and decide: approve, reject, or escalate to a human.
 
