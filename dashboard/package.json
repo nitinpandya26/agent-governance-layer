@@ -1,0 +1,24 @@
+{
+  "name": "agent-governance-layer-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Phase 3 dashboard: a React + TypeScript ops/compliance view over the FastAPI read API in app/api.py. Separate from, and additive to, the server-rendered Jinja UI in app/templates (which stays as the primary workflow UI - submitting requests, working the escalation queue). This is the reviewer-facing visual layer: the full decision/audit trail, flagged vs clean filtering, and the policy override rate trend.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "^5.7.0",
+    "vite": "^5.4.11"
+  }
+}
