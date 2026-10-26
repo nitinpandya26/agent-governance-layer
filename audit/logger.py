@@ -11,6 +11,7 @@
 import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -22,6 +23,11 @@ from psycopg2.extras import Json
 # below). Git-tracked and committed/pushed separately from the app's DB
 # credentials, so it is not something the app's own Postgres access can rewrite.
 ANCHOR_FILE = Path(__file__).resolve().parent / "chain_anchors.jsonl"
+
+# Immutable OpenTimestamps snapshots of ANCHOR_FILE (see
+# scripts/timestamp_anchor.py) - a third, independent layer on top of the
+# chain itself and the git anchor above. See verify_chain_against_timestamp.
+TIMESTAMPS_DIR = Path(__file__).resolve().parent / "timestamps"
 
 
 def get_connection():
@@ -202,6 +208,62 @@ def verify_chain_against_anchor(run_id: str) -> dict:
     return {"chain_valid": chain_valid, "anchor_found": True, "anchor_matches": matches}
 
 
+def verify_chain_against_timestamp(run_id: str) -> dict:
+    """Independent third check on top of verify_chain_against_anchor: is
+    there a Bitcoin-confirmed OpenTimestamps proof covering this run's
+    anchor entry (see scripts/timestamp_anchor.py / scripts/upgrade_timestamps.py)?
+
+    Scans audit/timestamps/ (local snapshots of chain_anchors.jsonl, each
+    paired with a .ots proof) for the earliest snapshot that already
+    contains this run_id's anchor line, then reports whether that
+    snapshot's proof is still pending or has a Bitcoin block height behind
+    it. Mirrors verify_chain_against_anchor's pattern of reading local
+    files that are expected to also be pushed to the `anchors` branch - an
+    unpushed/uncommitted snapshot offers no protection, same caveat as the
+    git anchor file.
+
+    Returns:
+    - snapshot_found: whether any local snapshot covers this run's anchor.
+    - confirmed: whether a BitcoinBlockHeaderAttestation exists (still
+      trusts the calendar server's claim about the block height - see
+      scripts/_ots.py's module docstring for that boundary).
+    - confirmed_heights: Bitcoin block heights attesting to this digest, if any.
+    - snapshot_file: which snapshot under audit/timestamps/ was used.
+    """
+    if not TIMESTAMPS_DIR.exists():
+        return {"snapshot_found": False, "confirmed": False, "confirmed_heights": [], "snapshot_file": None}
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts._ots import confirmed_heights, deserialize_ots, is_confirmed
+
+    for snapshot_path in sorted(TIMESTAMPS_DIR.glob("*.jsonl")):
+        ots_path = snapshot_path.with_suffix(snapshot_path.suffix + ".ots")
+        if not ots_path.exists():
+            continue
+
+        found = False
+        with open(snapshot_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if json.loads(line).get("run_id") == run_id:
+                    found = True
+                    break
+        if not found:
+            continue
+
+        detached = deserialize_ots(ots_path.read_bytes())
+        return {
+            "snapshot_found": True,
+            "confirmed": is_confirmed(detached.timestamp),
+            "confirmed_heights": confirmed_heights(detached.timestamp),
+            "snapshot_file": snapshot_path.name,
+        }
+
+    return {"snapshot_found": False, "confirmed": False, "confirmed_heights": [], "snapshot_file": None}
+
+
 def verify_chain(run_id: str) -> bool:
     """Recompute every hash in sequence and check it matches what's stored.
     Returns False the moment any row's stored hash doesn't match — meaning
@@ -263,6 +325,93 @@ def list_runs() -> list[dict]:
         }
         for run_id, request_payload, created_at, decision_payload, policy_payload in rows
     ]
+
+
+def is_overridden(decision: dict | None, policy: dict | None) -> bool:
+    """True iff the agent proposed 'approve' and the policy gate didn't
+    allow it outright (escalated or denied it instead). The policy gate
+    only constrains approvals (see policies/decision.rego), so this is the
+    only shape an "override" can take here - matches the README's "A
+    finding worth noting" framing of the one place agent judgment and
+    policy diverged."""
+    if not decision or not policy:
+        return False
+    if decision.get("decision") != "approve":
+        return False
+    return policy.get("result", {}).get("outcome") != "allow"
+
+
+def overridden_rules(policy: dict | None) -> list[str]:
+    """Which named policy rule(s) fired on an overridden run (see
+    is_overridden) - escalate_reasons and deny_reasons are both lists of
+    {"policy": name, "message": ...}; only one of the two is ever
+    populated per policies/decision.rego's outcome logic, but reading both
+    is forward-compatible against that changing."""
+    if not policy:
+        return []
+    result = policy.get("result", {})
+    reasons = result.get("escalate_reasons", []) + result.get("deny_reasons", [])
+    return [r["policy"] for r in reasons]
+
+
+def get_override_stats() -> dict:
+    """Aggregate 'agent proposed approve, policy overrode it' over time,
+    broken out by which rule fired - Alan Law's Phase 3 feedback
+    (docs/linkedin_feedback.md): track this as a rate split by rule, not
+    one total, since a rise on a single rule usually means traffic shifted
+    while a rise across all of them points at the model/prompt.
+
+    The underlying data already exists in every policy_check audit event;
+    this is purely an aggregation over list_runs(), no new logging needed.
+
+    Returns:
+    {
+      "by_day": [
+        {"date": "2026-10-06", "approve_proposals": 12, "overridden": 3,
+         "override_rate": 0.25, "by_rule": {"above_auto_approve_limit": 2, ...}},
+        ...
+      ],  # ascending by date
+      "totals": {"approve_proposals": N, "overridden": M, "override_rate": M/N,
+                 "by_rule": {...}},
+    }
+    """
+    runs = sorted(list_runs(), key=lambda r: r["created_at"])
+
+    by_day: dict[str, dict] = {}
+    totals = {"approve_proposals": 0, "overridden": 0, "by_rule": {}}
+
+    for run in runs:
+        decision = run["decision"]
+        policy = run["policy"]
+        if not decision or decision.get("decision") != "approve":
+            continue
+
+        date = run["created_at"][:10]
+        bucket = by_day.setdefault(
+            date, {"date": date, "approve_proposals": 0, "overridden": 0, "by_rule": {}}
+        )
+        bucket["approve_proposals"] += 1
+        totals["approve_proposals"] += 1
+
+        if is_overridden(decision, policy):
+            bucket["overridden"] += 1
+            totals["overridden"] += 1
+            for rule in overridden_rules(policy):
+                bucket["by_rule"][rule] = bucket["by_rule"].get(rule, 0) + 1
+                totals["by_rule"][rule] = totals["by_rule"].get(rule, 0) + 1
+
+    by_day_list = []
+    for bucket in sorted(by_day.values(), key=lambda b: b["date"]):
+        bucket["override_rate"] = (
+            bucket["overridden"] / bucket["approve_proposals"] if bucket["approve_proposals"] else 0.0
+        )
+        by_day_list.append(bucket)
+
+    totals["override_rate"] = (
+        totals["overridden"] / totals["approve_proposals"] if totals["approve_proposals"] else 0.0
+    )
+
+    return {"by_day": by_day_list, "totals": totals}
 
 
 def finalize_run(run_id: str, status: str) -> None:

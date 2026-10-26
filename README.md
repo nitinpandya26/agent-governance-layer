@@ -39,8 +39,13 @@ runs waiting on human review.
 
 **Current status:** Phase 1 and Phase 2 complete - core agent loop,
 hash-chained audit trail with an external anchor, and OPA policy gate with
-escalation queue, all running locally end to end. Phase 3 (dashboard) is
-next.
+escalation queue, all running locally end to end. Phase 3 (OpenTimestamps +
+React dashboard) is built: the backend/API/OTS pieces are exercised directly
+(see "Why the hash chain matters" and `scripts/_ots.py`), but the dashboard
+itself hasn't been built-and-clicked-through yet in this environment, since
+it needs Node/npm to build (see "Running it locally") and this dev machine's
+shell doesn't have Node on its PATH. Treat it as code-complete, not yet
+run-verified, until that build happens once.
 
 ## Scope: what this governs, and what it doesn't
 
@@ -100,6 +105,44 @@ operator's own machine can't reach. Worth being explicit about that instead
 of letting "external anchor" imply more isolation than a local dev setup
 can actually provide.
 
+**A third, independent layer: OpenTimestamps.** The git anchor above proves
+a chain head existed in git history as of a given commit - which is only as
+trustworthy as GitHub's own timestamps and the repo's history not being
+rewritten. `scripts/timestamp_anchor.py` adds a layer that doesn't depend on
+GitHub at all: it takes an immutable snapshot of `audit/chain_anchors.jsonl`,
+submits its hash to a handful of public [OpenTimestamps](https://opentimestamps.org)
+calendar servers, and saves the resulting `.ots` proof under
+`audit/timestamps/` (both locally and pushed to the `anchors` branch, same
+scoped credential as the git anchor). Once the digest is included in a
+Bitcoin block - which the free calendar servers batch and submit on your
+behalf - nobody with any amount of access to this repo or its GitHub account
+can backdate that proof.
+
+Two things worth stating plainly rather than letting "timestamped" imply
+more than it does. First, the lifecycle: a stamp is provisional the moment
+it's created (the calendar has accepted the digest, but no block has
+confirmed it yet) and stays that way for anywhere from minutes to hours;
+`scripts/upgrade_timestamps.py` re-checks pending proofs and finalizes the
+ones that have confirmed. This is not instant, and nothing here pretends
+otherwise. Second, this is a real external network dependency on top of
+what's otherwise a fully local/offline demo - calls to OpenTimestamps
+calendar servers over HTTPS. Low-risk and free, but worth flagging rather
+than burying: an otherwise air-gapped-capable project now has one feature
+that genuinely needs the internet. `audit.logger.verify_chain_against_timestamp()`
+reports whether a given run's anchor has a Bitcoin-confirmed OpenTimestamps
+proof behind it yet, and is honest about its own remaining limit: it trusts
+the calendar server's claim about which block height a digest landed in,
+rather than independently reconstructing that block's merkle root from a
+Bitcoin node - a possible future tightening, not something claimed to be
+closed now.
+
+(Implementation note: the `opentimestamps-client` CLI itself (`ots`) doesn't
+run on this machine - its Bitcoin-RPC import path crashes on Windows before
+any command can execute, unrelated to whether RPC is actually needed. The
+scripts above use the underlying `opentimestamps` library's calendar client
+directly instead, which has no such dependency; see `scripts/_ots.py` for
+specifics.)
+
 Proof: below said 2 outputs in the repo, including a live tamper test
 where editing a row directly in Postgres flips `verify_chain()` from `True` to `False`.
 
@@ -154,6 +197,9 @@ data, so they're excluded from the test run).
 
 Python, FastAPI, LangGraph, OpenAI, PostgreSQL, Docker Compose.
 Phase 2 adds Open Policy Agent (OPA/Rego) for declarative policy enforcement.
+Phase 3 adds a React + TypeScript dashboard (`dashboard/`, served by the same
+FastAPI app at `/dashboard`) and an OpenTimestamps external anchor
+(`opentimestamps` library, no `ots` CLI - see `scripts/_ots.py`).
 
 ## A finding worth noting
 
@@ -175,6 +221,19 @@ the model is reckless, since across every category it tested well, but that
 it has no way to know your specific compliance thresholds unless you encode
 them somewhere it can't reason around.
 
+**Checking a prediction against real data.** When Alan Law's "split the
+override rate by rule" feedback (`docs/linkedin_feedback.md`) was being
+turned into the Phase 3 dashboard, the specific prediction was that
+`above_auto_approve_limit` would fire first/most once the metric existed,
+since it's the one rule the agent's prompt gives the model zero visibility
+into. Running `audit.logger.get_override_stats()` against this project's
+actual logged runs confirms it: every override observed so far (2 of 19
+logged approval proposals) is `above_auto_approve_limit` - the same two
+cases described above. No other rule has fired yet. A small sample, and
+worth re-checking as more/real traffic accumulates per Alan's own framing
+(a rise *across* rules later would point at the model or prompt, not just
+traffic shift), but the prediction holds on everything logged so far.
+
 
 ## Running it locally
 
@@ -185,8 +244,19 @@ uv sync
 docker compose up -d          # Postgres + OPA
 uv run py data/generate_requests.py
 uv run py tests/run_all.py    # runs all requests through the agent + policy gate
-uv run py -m uvicorn app.main:app --reload   # browse runs at http://localhost:8000
+
+# dashboard/ is a separate React + TS app (Phase 3) built into app/static/dashboard
+# and served by the same FastAPI app - build it once before first run:
+cd dashboard && npm install && npm run build && cd ..
+
+uv run py -m uvicorn app.main:app --reload
+# Runs list + escalation queue (Jinja UI): http://localhost:8000
+# Decision review dashboard (React):       http://localhost:8000/dashboard
 \`\`\`
+
+While iterating on the dashboard itself, `cd dashboard && npm run dev` runs it
+on its own dev server with hot reload, proxying `/api/*` to the FastAPI
+backend (see `dashboard/vite.config.ts`) - no rebuild-and-refresh loop needed.
 
 Run the policy's own unit tests with the same OPA image used in Docker Compose:
 
@@ -204,11 +274,27 @@ kept separate from your normal git credentials:
 uv run python scripts/push_anchor.py
 \`\`\`
 
+Stamp the current anchor file with an independent OpenTimestamps proof (see
+"A third, independent layer: OpenTimestamps" above), and later upgrade any
+still-pending proofs once they've had time to confirm. Same `ANCHOR_GIT_TOKEN`
+requirement:
+
+\`\`\`bash
+uv run python scripts/timestamp_anchor.py
+uv run python scripts/upgrade_timestamps.py   # run again later; a stamp takes time to confirm
+\`\`\`
+
 ## Roadmap
 
 - [x] Phase 1: Core agent loop + hash-chained audit trail with external anchor
 - [x] Phase 2: OPA policy-as-code enforcement + escalation queue
-- [ ] Phase 3: Dashboard + named case study
+- [x] Phase 3: OpenTimestamps external anchor + React dashboard (API and
+      aggregation verified live; the dashboard build itself needs a one-time
+      `npm install && npm run build` not yet run in this environment - see
+      "Current status" above). The "named case study" part of this line
+      actually belongs to a later, separate phase
+      (`docs/phase-8-case-study-outreach.md`, not yet on this roadmap list),
+      not to this one.
 - [ ] Phase 4: LLM-as-judge (stretch)
 - [ ] Phase 5: Distribution
 

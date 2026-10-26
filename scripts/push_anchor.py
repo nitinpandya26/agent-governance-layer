@@ -29,45 +29,28 @@ Usage:
   uv run python scripts/push_anchor.py
 
 Safe to run anytime: it never touches your working tree, index, or
-whatever branch you currently have checked out. It operates entirely via
-git plumbing (hash-object / mktree / commit-tree) against the local repo's
-object database and pushes a single ref update directly to the remote.
+whatever branch you currently have checked out (see scripts/_anchor_git.py
+for the git-plumbing details and why it preserves other files already on
+the `anchors` branch, such as the OpenTimestamps snapshots published by
+scripts/timestamp_anchor.py).
 """
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from dotenv import load_dotenv
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from scripts._anchor_git import REPO_ROOT, publish_files
+
 load_dotenv(REPO_ROOT / ".env")
 ANCHOR_FILE = REPO_ROOT / "audit" / "chain_anchors.jsonl"
 ANCHOR_BRANCH = "anchors"
 ANCHOR_PATH_IN_TREE = "chain_anchors.jsonl"
 ANCHOR_AUTHOR_NAME = "agent-governance-anchor-bot"
 ANCHOR_AUTHOR_EMAIL = "anchor-bot@users.noreply.github.com"
-
-
-def _git(*args: str, env: dict | None = None) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, env=env,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed:\n{result.stderr}")
-    return result.stdout.strip()
-
-
-def _remote_url_with_token(token: str) -> str:
-    origin = _git("remote", "get-url", "origin")
-    if not origin.startswith("https://"):
-        raise RuntimeError(
-            f"origin remote ({origin}) is not an https:// URL; this script "
-            "only knows how to inject a token into an https remote."
-        )
-    # https://github.com/owner/repo.git -> https://x-access-token:TOKEN@github.com/owner/repo.git
-    return origin.replace("https://", f"https://x-access-token:{token}@", 1)
 
 
 def main() -> int:
@@ -86,58 +69,26 @@ def main() -> int:
         print(f"{ANCHOR_FILE} does not exist yet; nothing to publish.", file=sys.stderr)
         return 1
 
-    remote_url = _remote_url_with_token(token)
-
-    # Find the current tip of the anchors branch on the remote, if it
-    # already exists. Empty string means this is the first push.
-    ls_remote = _git("ls-remote", remote_url, f"refs/heads/{ANCHOR_BRANCH}")
-    parent_sha = ls_remote.split()[0] if ls_remote else None
-
-    # Build a blob for the anchor file's current content.
-    with open(ANCHOR_FILE, "rb") as f:
-        blob_sha = subprocess.run(
-            ["git", "hash-object", "-w", "--stdin"],
-            cwd=REPO_ROOT, input=f.read(), capture_output=True, check=True,
-        ).stdout.decode().strip()
-
-    # Build a tree containing just that one file.
-    mktree_input = f"100644 blob {blob_sha}\t{ANCHOR_PATH_IN_TREE}\n"
-    tree_sha = subprocess.run(
-        ["git", "mktree"],
-        cwd=REPO_ROOT, input=mktree_input.encode(), capture_output=True, check=True,
-    ).stdout.decode().strip()
-
-    # If the tree is identical to the parent commit's tree, there's nothing
-    # new to anchor - skip the push instead of making an empty commit.
-    if parent_sha:
-        parent_tree = _git("rev-parse", f"{parent_sha}^{{tree}}")
-        if parent_tree == tree_sha:
-            print("No new anchor entries since the last publish; nothing to push.")
-            return 0
-
-    commit_env = os.environ.copy()
-    commit_env.update({
-        "GIT_AUTHOR_NAME": ANCHOR_AUTHOR_NAME,
-        "GIT_AUTHOR_EMAIL": ANCHOR_AUTHOR_EMAIL,
-        "GIT_COMMITTER_NAME": ANCHOR_AUTHOR_NAME,
-        "GIT_COMMITTER_EMAIL": ANCHOR_AUTHOR_EMAIL,
-    })
-
     message = (
         f"Anchor publish: {datetime.now(timezone.utc).isoformat()}\n\n"
         "Pushed by scripts/push_anchor.py using a scoped credential, "
         "deliberately not the operator's normal git identity."
     )
 
-    commit_args = ["commit-tree", tree_sha, "-m", message]
-    if parent_sha:
-        commit_args = ["commit-tree", tree_sha, "-p", parent_sha, "-m", message]
+    new_commit_sha = publish_files(
+        branch=ANCHOR_BRANCH,
+        files={ANCHOR_PATH_IN_TREE: ANCHOR_FILE},
+        author_name=ANCHOR_AUTHOR_NAME,
+        author_email=ANCHOR_AUTHOR_EMAIL,
+        message=message,
+        token=token,
+    )
 
-    new_commit_sha = _git(*commit_args, env=commit_env)
+    if new_commit_sha is None:
+        print("No new anchor entries since the last publish; nothing to push.")
+        return 0
 
-    _git("push", remote_url, f"{new_commit_sha}:refs/heads/{ANCHOR_BRANCH}")
-
-    print(f"Pushed {new_commit_sha} to {ANCHOR_BRANCH} (parent: {parent_sha or 'none, first push'}).")
+    print(f"Pushed {new_commit_sha} to {ANCHOR_BRANCH}.")
     return 0
 
 

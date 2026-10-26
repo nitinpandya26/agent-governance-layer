@@ -4,19 +4,40 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from agent.graph import build_graph
 from agent.tools import CUSTOMERS
+from app.api import router as api_router
 from audit.logger import get_trace, list_escalations, list_runs, resolve_escalation, verify_chain
 
+APP_DIR = Path(__file__).resolve().parent
+DASHBOARD_DIST = APP_DIR / "static" / "dashboard"
+
 app = FastAPI(title="Agent Governance Layer")
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
-app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
+app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
+app.include_router(api_router)
 
 graph = build_graph()
+
+
+@app.get("/dashboard")
+@app.get("/dashboard/{_path:path}")
+def dashboard_spa(_path: str = ""):
+    """Serve the built React dashboard (dashboard/, built into
+    app/static/dashboard/) for every /dashboard route - it's a
+    client-side-routed single-page app (BrowserRouter, basename=/dashboard),
+    so every path under here needs to resolve to the same index.html and
+    let React Router take over from there."""
+    index = DASHBOARD_DIST / "index.html"
+    if not index.exists():
+        raise RuntimeError(
+            f"{index} not found - run `npm install && npm run build` in dashboard/ first."
+        )
+    return FileResponse(index)
 
 
 @app.get("/")
